@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Magic Touch · Edição Amigos</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪄</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Fredoka:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0d1433;--ink2:#1c1650;--violet:#8a63ff;--gold:#ffc857;--mint:#5cf2c0;--rose:#ff5c8a;--text:#f2eeff}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--ink);color:var(--text);font-family:'Fredoka',system-ui,sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+#hud{position:fixed;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:flex-start;padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 0;pointer-events:none;font-size:clamp(16px,2.6vw,22px)}
+#hud b{font-family:'Bagel Fat One',system-ui,sans-serif;font-weight:400;font-size:2.1em;line-height:1;color:var(--gold);display:block;text-shadow:0 0 18px #ffc85766}
+#hud small{opacity:.7;font-size:.8em}
+#lives{display:flex;gap:6px;justify-content:flex-end;margin-bottom:6px}
+#lives i{width:18px;height:18px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,var(--rose) 60%);box-shadow:0 0 12px var(--rose);transition:.25s}
+#lives i.off{background:#ffffff22;box-shadow:none;transform:scale(.6)}
+#combo{color:var(--mint);min-height:1.3em;text-align:right}
+#mute{pointer-events:auto;position:fixed;right:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);background:#ffffff14;border:1px solid #ffffff33;color:var(--text);border-radius:99px;padding:8px 14px;font:inherit;font-size:14px;cursor:pointer}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;padding:24px;background:radial-gradient(ellipse at 50% 40%,#1c165099,#0d1433ee 70%);transition:opacity .35s}
+.screen.hide{opacity:0;pointer-events:none}
+h1{font-family:'Bagel Fat One',system-ui,sans-serif;font-weight:400;font-size:clamp(52px,13vw,128px);line-height:.88;letter-spacing:.01em;background:linear-gradient(180deg,#fff 10%,var(--gold) 55%,#ff8a3d);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 6px 0 #4b2fb8) drop-shadow(0 0 30px #8a63ff88);transform:rotate(-3deg)}
+.screen p{max-width:30ch;font-size:clamp(16px,2.4vw,20px);line-height:1.4;opacity:.85}
+button.go{font:inherit;font-weight:600;font-size:22px;color:#2a1a00;background:linear-gradient(180deg,#ffe08a,var(--gold));border:0;border-radius:99px;padding:14px 38px;cursor:pointer;box-shadow:0 5px 0 #b57f12,0 0 30px #ffc85766;transition:transform .1s,box-shadow .1s}
+button.go:active{transform:translateY(4px);box-shadow:0 1px 0 #b57f12}
+button:focus-visible{outline:3px solid var(--mint);outline-offset:3px}
+.big{font-family:'Bagel Fat One',system-ui,sans-serif;font-size:clamp(56px,14vw,110px);color:var(--gold);line-height:1}
+@media (prefers-reduced-motion:reduce){h1{transform:none}}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Jogo Magic Touch"></canvas>
+<div id="hud" aria-live="polite">
+  <div><b id="score">0</b><small>recorde <span id="best">0</span></small></div>
+  <div><div id="lives"></div><div id="combo"></div></div>
+</div>
+<button id="mute" aria-label="Som">🔊 som</button>
+
+<div class="screen" id="start">
+  <h1>Magic<br>Touch</h1>
+  <p>Os amigos estão caindo! Digite a letra do rosto ou arraste a varinha por cima pra estourar.</p>
+  <button class="go" id="play">Jogar</button>
+</div>
+<div class="screen hide" id="over">
+  <div class="big" id="finalScore">0</div>
+  <p id="finalMsg"></p>
+  <button class="go" id="again">Jogar de novo</button>
+</div>
+
+<script>
+(() => {
+const FRIENDS = [
+  ['N','assets/01_N.jpg'],['D','assets/02_D.jpg'],['A','assets/03_A.jpg'],['J','assets/04_J.jpg'],
+  ['A','assets/05_A.jpg'],['A','assets/06_A.jpg'],['B','assets/07_B.jpg'],['L','assets/08_L.jpg'],
+  ['B','assets/09_B.jpg'],['G','assets/10_G.jpg'],['L','assets/11_L.jpg'],['L','assets/12_L.jpg'],['T','assets/13_T.jpg']
+].map(([letter, src], i) => { const img = new Image(); img.src = src; return {letter, img, hue: (i * 47) % 360}; });
+
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+const COLORS = ['#ffc857','#5cf2c0','#ff5c8a','#8a63ff','#ffffff'];
+let W, H, DPR, R;
+function resize(){
+  DPR = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+  R = Math.max(34, Math.min(62, Math.min(W, H) * 0.085));
+}
+addEventListener('resize', resize); resize();
+
+// ---------- sound ----------
+let ac, muted = false;
+function tone(f, d = .12, type = 'sine', vol = .08, slide = 0){
+  if (muted) return;
+  try{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(f + slide, t + d);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+    o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + d);
+  }catch(e){}
+}
+$('mute').onclick = e => { muted = !muted; e.target.textContent = muted ? '🔇 mudo' : '🔊 som'; e.target.blur(); };
+
+// ---------- state ----------
+const stars = Array.from({length: 90}, () => ({x: Math.random(), y: Math.random(), s: Math.random() * 1.6 + .4, p: Math.random() * 6.28}));
+let faces = [], parts = [], pops = [], trail = [];
+let score, lives, combo, popped, running = false, paused = false, spawnT, last = 0, shake = 0, t0 = 0;
+let best = 0; try { best = +localStorage.getItem('mt-best') || 0; } catch(e){}
+$('best').textContent = best;
+
+function drawLives(){ $('lives').innerHTML = Array.from({length: 5}, (_, i) => `<i class="${i < lives ? '' : 'off'}"></i>`).join(''); }
+function level(){ return 1 + Math.floor(popped / 12); }
+function reset(){
+  faces = []; parts = []; pops = []; score = 0; lives = 5; combo = 0; popped = 0; spawnT = .4; shake = 0;
+  $('score').textContent = 0; $('combo').textContent = ''; drawLives();
+}
+function spawn(){
+  const f = FRIENDS[Math.random() * FRIENDS.length | 0], lv = level();
+  faces.push({f, x: R + Math.random() * (W - 2 * R), y: -R - 10, vy: 62 + lv * 16 + Math.random() * 30,
+    ph: Math.random() * 6.28, amp: 10 + Math.random() * 22, bx: 0, rot: (Math.random() - .5) * .3, born: performance.now()});
+  faces[faces.length - 1].bx = faces[faces.length - 1].x;
+}
+function burst(x, y, n = 26){
+  for (let i = 0; i < n; i++){
+    const a = Math.random() * 6.28, s = 80 + Math.random() * 260;
+    parts.push({x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: .7 + Math.random() * .5, max: 1.2, c: COLORS[i % 5], s: 2 + Math.random() * 4, star: Math.random() < .4});
+  }
+  pops.push({x, y, r: R * .6, life: .4});
+}
+function pop(fc){
+  faces.splice(faces.indexOf(fc), 1);
+  combo++; popped++;
+  const gain = 10 * Math.min(combo, 10) ; score += gain;
+  burst(fc.x, fc.y);
+  parts.push({txt: '+' + gain, x: fc.x, y: fc.y - R, vx: 0, vy: -70, life: .8, max: .8, c: '#ffc857', s: 0});
+  tone(520 + Math.min(combo, 12) * 40, .16, 'triangle', .09, 380);
+  $('score').textContent = score;
+  $('combo').textContent = combo >= 3 ? `combo ×${Math.min(combo, 10)}` : '';
+  if (popped % 12 === 0) tone(880, .3, 'sine', .08, 440);
+}
+function miss(fc){
+  faces.splice(faces.indexOf(fc), 1);
+  lives--; combo = 0; shake = .35; $('combo').textContent = '';
+  tone(150, .3, 'sawtooth', .07, -70); drawLives();
+  burst(fc.x, H - 6, 10);
+  if (lives <= 0) end();
+}
+function end(){
+  running = false;
+  if (score > best){ best = score; try { localStorage.setItem('mt-best', best); } catch(e){} $('best').textContent = best; }
+  $('finalScore').textContent = score;
+  $('finalMsg').textContent = score && score >= best ? `Novo recorde! ${popped} amigos estourados.` : `${popped} amigos estourados. Recorde: ${best}.`;
+  $('over').classList.remove('hide');
+}
+function begin(){
+  $('start').classList.add('hide'); $('over').classList.add('hide');
+  reset(); running = true; paused = false; last = performance.now(); tone(660, .2, 'triangle', .08, 330);
+}
+$('play').onclick = begin; $('again').onclick = begin;
+
+// ---------- input ----------
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && running){ paused = !paused; last = performance.now(); return; }
+  if ((e.key === 'Enter' || e.key === ' ') && !running){
+    if (!$('start').classList.contains('hide') || !$('over').classList.contains('hide')){ e.preventDefault(); begin(); }
+    return;
+  }
+  if (!running || paused || e.ctrlKey || e.metaKey || e.key.length !== 1) return;
+  const k = e.key.toUpperCase();
+  const m = faces.filter(f => f.f.letter === k).sort((a, b) => b.y - a.y)[0];
+  if (m) pop(m); else if (/[A-Z]/.test(k)){ combo = 0; $('combo').textContent = ''; tone(190, .1, 'square', .04); }
+});
+let down = false;
+function hit(x, y){
+  for (const fc of faces.slice()) if (Math.hypot(fc.x - x, fc.y - y) < R * 1.05) pop(fc);
+}
+cv.addEventListener('pointerdown', e => { down = true; trail = [{x: e.clientX, y: e.clientY, t: performance.now()}]; if (running && !paused) hit(e.clientX, e.clientY); });
+cv.addEventListener('pointermove', e => {
+  trail.push({x: e.clientX, y: e.clientY, t: performance.now()});
+  if (down && running && !paused) hit(e.clientX, e.clientY);
+});
+addEventListener('pointerup', () => down = false);
+addEventListener('pointercancel', () => down = false);
+document.addEventListener('visibilitychange', () => { if (document.hidden && running) paused = true; });
+
+// ---------- render ----------
+function drawStar(x, y, r){
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++){ const a = i * Math.PI / 4, rr = i % 2 ? r * .35 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  ctx.closePath(); ctx.fill();
+}
+function drawFace(fc, now){
+  const {f, x, y} = fc, r = R, age = Math.min((now - fc.born) / 300, 1);
+  ctx.save(); ctx.translate(x, y); ctx.rotate(fc.rot + Math.sin(now / 500 + fc.ph) * .06); ctx.scale(.6 + .4 * age, .6 + .4 * age);
+  // orb glow
+  const g = ctx.createRadialGradient(0, 0, r * .8, 0, 0, r * 1.45);
+  g.addColorStop(0, `hsla(${f.hue},90%,70%,.55)`); g.addColorStop(1, 'transparent');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r * 1.45, 0, 6.28); ctx.fill();
+  // photo
+  ctx.save(); ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.28); ctx.clip();
+  ctx.fillStyle = '#fff'; ctx.fillRect(-r, -r, 2 * r, 2 * r);
+  if (f.img.complete && f.img.naturalWidth) ctx.drawImage(f.img, -r, -r, 2 * r, 2 * r);
+  ctx.restore();
+  // ring
+  ctx.lineWidth = 4; ctx.strokeStyle = `hsl(${f.hue},90%,72%)`; ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.28); ctx.stroke();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffffffcc'; ctx.beginPath(); ctx.arc(0, 0, r - 4, -2.6, -1.4); ctx.stroke();
+  // letter seal
+  const br = r * .38, bx = r * .72, by = r * .72;
+  ctx.fillStyle = '#ffc857'; ctx.shadowColor = '#000a'; ctx.shadowBlur = 8; ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.28); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.lineWidth = 3; ctx.strokeStyle = '#2a1a00'; ctx.stroke();
+  ctx.fillStyle = '#2a1a00'; ctx.font = `${br * 1.35}px 'Bagel Fat One', system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(f.letter, bx, by + br * .06);
+  ctx.restore();
+}
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, .05); last = now;
+  // background
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0d1433'); bg.addColorStop(.6, '#1c1650'); bg.addColorStop(1, '#3a1d6e');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  for (const s of stars){ ctx.globalAlpha = .35 + .5 * Math.abs(Math.sin(now / 900 + s.p)); ctx.fillRect(s.x * W, s.y * H, s.s, s.s); }
+  ctx.globalAlpha = 1;
+
+  const live = running && !paused;
+  if (live){
+    spawnT -= dt;
+    if (spawnT <= 0){ spawn(); spawnT = Math.max(.5, 1.35 - level() * .085) * (.75 + Math.random() * .5); }
+    for (const fc of faces.slice()){
+      fc.y += fc.vy * dt; fc.x = fc.bx + Math.sin(now / 700 + fc.ph) * fc.amp;
+      if (fc.y > H + R * .2) miss(fc);
+    }
+  }
+  ctx.save();
+  if (shake > 0){ shake -= dt; ctx.translate((Math.random() - .5) * 10, (Math.random() - .5) * 10); }
+  // floor glow
+  const fg = ctx.createLinearGradient(0, H - 70, 0, H); fg.addColorStop(0, 'transparent'); fg.addColorStop(1, shake > 0 ? '#ff5c8acc' : '#8a63ff55');
+  ctx.fillStyle = fg; ctx.fillRect(0, H - 70, W, 70);
+  for (const fc of faces) drawFace(fc, now);
+  // particles
+  for (const p of parts.slice()){
+    p.life -= dt; if (p.life <= 0){ parts.splice(parts.indexOf(p), 1); continue; }
+    if (live || !p.txt){ p.x += p.vx * dt; p.y += p.vy * dt; if (!p.txt) p.vy += 420 * dt; }
+    ctx.globalAlpha = Math.min(1, p.life / (p.max * .6)); ctx.fillStyle = p.c;
+    if (p.txt){ ctx.font = "26px 'Bagel Fat One', system-ui, sans-serif"; ctx.textAlign = 'center'; ctx.fillText(p.txt, p.x, p.y); }
+    else if (p.star) drawStar(p.x, p.y, p.s * 1.8); else { ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, 6.28); ctx.fill(); }
+  }
+  for (const p of pops.slice()){
+    p.life -= dt; if (p.life <= 0){ pops.splice(pops.indexOf(p), 1); continue; }
+    p.r += 260 * dt; ctx.globalAlpha = p.life / .4; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.28); ctx.stroke();
+  }
+  ctx.globalAlpha = 1; ctx.restore();
+  // wand trail
+  trail = trail.filter(p => now - p.t < 380);
+  if (trail.length > 1 && (down || trail.length)){
+    for (let i = 1; i < trail.length; i++){
+      const a = trail[i - 1], b = trail[i], k = 1 - (now - b.t) / 380;
+      ctx.strokeStyle = `rgba(${i % 2 ? '255,200,87' : '138,99,255'},${k})`; ctx.lineWidth = 2 + 9 * k; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      if (down && Math.random() < .25) parts.push({x: b.x, y: b.y, vx: (Math.random() - .5) * 60, vy: (Math.random() - .5) * 60, life: .5, max: .5, c: COLORS[Math.random() * 5 | 0], s: 1.5 + Math.random() * 2});
+    }
+  }
+  if (paused && running){
+    ctx.fillStyle = '#0d1433cc'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = '#ffc857'; ctx.textAlign = 'center';
+    ctx.font = "56px 'Bagel Fat One', system-ui, sans-serif"; ctx.fillText('pausado', W / 2, H / 2);
+    ctx.font = "18px Fredoka, system-ui, sans-serif"; ctx.fillStyle = '#fff'; ctx.fillText('Esc ou toque pra continuar', W / 2, H / 2 + 36);
+  }
+}
+cv.addEventListener('click', () => { if (paused && running){ paused = false; last = performance.now(); } });
+drawLives(); requestAnimationFrame(t => { last = t; frame(t); });
+})();
+</script>
+</body>
+</html>
